@@ -18,7 +18,8 @@ import numpy as np
 import gc
 import argparse
 import cv2
-
+import os
+import datetime
 
 # import torchvision.models as models
 
@@ -53,7 +54,7 @@ def plot_losses(epoch, train_losses, val_losses):
     plt.legend(loc='best')
     plt.xlabel('Epochs')
     plt.ylabel('Loss')
-    plt.show()
+    # plt.show()
     plt.savefig("losses/" + str(epoch) + "_" + "losses" + ".png")
 
 class ResNet18_noavgpool(torch.nn.Module):
@@ -118,14 +119,14 @@ class HeatmapLoss(nn.Module):
         return loss
 
     
-def train(synthetic: bool, pretrained: bool):
+def train(synthetic: bool, pretrained: bool, dataset_length, directory):
     # torchfunc.cuda.reset()
     torch.cuda.empty_cache()
     gc.collect()
 
     batch_sz = 8
 
-    learning_rate = 0.001
+    learning_rate = 0.01
     epochs = 100
     # dir_img = Path('/home/capurjos/Pytorch-UNet/cropped_imgs_raw/imgs')
     # dir_mask = Path('/home/capurjos/Pytorch-UNet/cropped_imgs_raw/masks')
@@ -135,11 +136,17 @@ def train(synthetic: bool, pretrained: bool):
     else:
         dir_img = Path('/home/capurjos/modified_labels/imgs')
         dir_mask = Path('/home/capurjos/modified_labels/json_masks')
+    
+    os.mkdir("losses/" + directory)
+    os.mkdir("predicted_imgs/" + directory)
+    # os.mkdir("smooth_grad_heatmaps/" + directory)
     img_scale = 1
     num_segments_per_line = 20
     dataset = fsDataset(dir_img, dir_mask, synthetic)
 
-    trn_size = int(0.9 * len(dataset))
+    trn_size = int(0.9 * dataset_length)
+    # trn_size = 5000
+    val_size = int(0.1 * dataset_length)
     # trn_size = 2000 # because 880 is divisible by batch size 
     # TODO solve this error File "train.py", line 211, in train
 #     left_lane_nn_output = left_lane_nn_output.reshape(batch_sz, 15, width)
@@ -148,13 +155,13 @@ def train(synthetic: bool, pretrained: bool):
     # trn_size = 30
     # trn_size = 1
     # val_size = int(0.05 * len(dataset))
-    val_size = len(dataset) - trn_size
+    # val_size = len(dataset) - trn_size
     # val_size = 5
     print_log_info(dataset, trn_size, val_size)
     train_losses = []
     val_losses = []
 
-    trn_dataset, val_dataset = torch.utils.data.random_split(dataset, [trn_size, val_size])
+    trn_dataset, val_dataset, _ = torch.utils.data.random_split(dataset, [trn_size, val_size, len(dataset) - trn_size - val_size])
     # val_dataset = trn_dataset
     seed = 42
     torch.manual_seed(seed)
@@ -172,7 +179,7 @@ def train(synthetic: bool, pretrained: bool):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("using device {0}".format(device))
     model = torch.hub.load('pytorch/vision:v0.10.0', 'resnet18', weights=None).to(device)
-    model.avgpool = nn.AdaptiveAvgPool2d(output_size=(7, 7))
+    model.avgpool = nn.AdaptiveAvgPool2d(output_size=(5, 5))
     # model = ResNet50NoAvgPool().to(device)
     # model.features = nn.Sequential(*list(model.features._modules.values())[:-1])
     # # model = ResNet18_noavgpool().to(device)
@@ -181,13 +188,13 @@ def train(synthetic: bool, pretrained: bool):
     
     num_ftrs = model.fc.in_features
     width = 256
-    print(f"input number of neurons in last layer is {25088, 2 * num_segments_per_line * width}")
+    # print(f"input number of neurons in last layer is {25088, 2 * num_segments_per_line * width}")
 
-    model.fc = nn.Linear(25088 , 2 * num_segments_per_line * width).to(device)
+    model.fc = nn.Linear(12800 , 2 * num_segments_per_line * width).to(device)
 
     # print(model)
 
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)    
     # criterion = nn.MSELoss()
     criterion = HeatmapLoss()
     # criterion = nn.L1Loss()
@@ -223,23 +230,28 @@ def train(synthetic: bool, pretrained: bool):
             # left_lane_nn_output.shape is width * 30 
             # print(net_output.shape)
             # TODO check if this works correctly for batch > 1
-            left_lane_nn_output, right_lane_nn_output = np.split(net_output, 2, axis=1)
-            left_lane_nn_output = left_lane_nn_output.reshape(batch_sz, 20, width)
-            right_lane_nn_output = right_lane_nn_output.reshape(batch_sz, 20, width)
-            # print(f"left lane nn output is {left_lane_nn_output.shape}")
-            # print(f"left heatmap outpit shape is {left_lane_heatmap.shape}")
-            # print(left_lane_nn_output[left_indices].shape)
-            # print(f"shape of nn left output is: {left_lane_nn_output.flatten().shape}")
-            # print(f"shape of left lane heatmap is {left_lane_heatmap.flatten().shape}")
-            loss = criterion(left_lane_nn_output[left_indices].flatten(), left_lane_heatmap[left_indices].flatten())
-            loss += criterion(right_lane_nn_output[right_indices].flatten(), right_lane_heatmap[right_indices].flatten())
-            optimizer.zero_grad()
-            loss.backward()
-            nn.utils.clip_grad_value_(model.parameters(), clip_value=1.0)
-            optimizer.step()
-            train_loss += loss.item()
-            torch.cuda.empty_cache()
-            gc.collect()
+            try:
+                left_lane_nn_output, right_lane_nn_output = np.split(net_output, 2, axis=1)
+                left_lane_nn_output = left_lane_nn_output.reshape(batch_sz, 20, width)
+                right_lane_nn_output = right_lane_nn_output.reshape(batch_sz, 20, width)
+                # print(f"left lane nn output is {left_lane_nn_output.shape}")
+                # print(f"left heatmap outpit shape is {left_lane_heatmap.shape}")
+                # print(left_lane_nn_output[left_indices].shape)
+                # print(f"shape of nn left output is: {left_lane_nn_output.flatten().shape}")
+                # print(f"shape of left lane heatmap is {left_lane_heatmap.flatten().shape}")
+                loss = criterion(left_lane_nn_output[left_indices].flatten(), left_lane_heatmap[left_indices].flatten())
+                loss += criterion(right_lane_nn_output[right_indices].flatten(), right_lane_heatmap[right_indices].flatten())
+                optimizer.zero_grad()
+                loss.backward()
+                # TODO
+                # nn.utils.clip_grad_value_(model.parameters(), clip_value=1.0)
+                optimizer.step()
+                train_loss += loss.item()
+                torch.cuda.empty_cache()
+                gc.collect()
+            except RuntimeError:
+                continue
+
 
 
             if i_batch % 10 == 0:
@@ -254,7 +266,8 @@ def train(synthetic: bool, pretrained: bool):
         with torch.no_grad():
             # if epoch < 25:
             #     continue
-            for i_batch, batch in enumerate(val_loader):
+            # TODO switch to val_loader
+            for i_batch, batch in enumerate(trn_loader):
                 images = batch["image"]
                 left_lane_heatmap = batch["left_lane_heatmap"].float()
                 right_lane_heatmap = batch["right_lane_heatmap"].float()
@@ -321,14 +334,15 @@ def train(synthetic: bool, pretrained: bool):
                         plt.clf()
                         heatmap = plt.imshow(left_heatmap_mask, cmap='hot', interpolation='nearest')
                         plt.colorbar(heatmap)
-                        plt.show()
-                        plt.savefig("heatmaps/left_heatmap_epoch_" + str(epoch) + "_" + filename)
+                        # plt.show()
+                        plt.savefig("heatmaps/" + directory + "/left_heatmap_epoch_" + str(epoch) + "_" + filename)
                         # ---
                         plt.clf()
                         heatmap = plt.imshow(right_heatmap_mask, cmap='hot', interpolation='nearest')
                         plt.colorbar(heatmap)
-                        plt.show()
-                        plt.savefig("heatmaps/right_heatmap_epoch_" + str(epoch) + "_" + filename)
+                        # plt.show()
+                        
+                        plt.savefig("heatmaps/" + directory + "/right_heatmap_epoch_" + str(epoch) + "_" + filename)
 
 
                     # cv2.imwrite("left_heatmap_val_dataset.png", left_heatmap_mask)
@@ -346,7 +360,7 @@ def train(synthetic: bool, pretrained: bool):
                     # img_indices = indices[i].cpu()
                     # print(f"shape is {left_lane_heatmap.shape}")
 
-                    if epoch > 10:
+                    if epoch > 0:
                         # plot_imgs(images[i], pred_left_lane, pred_right_lane, true_left_lane, true_right_lane, rows, indices, epoch)
                         plt.clf()
                         plt.plot(left_lane_pts[cur_left_indices] * 5, rows[cur_left_indices], marker="o", markersize=5, markeredgecolor="red", markerfacecolor="green")
@@ -360,8 +374,9 @@ def train(synthetic: bool, pretrained: bool):
                     # plt.plot(true_left_lane[indices], rows[indices], "b", true_right_lane[indices], rows[indices], "y")
 
                         plt.imshow((images[i].cpu().permute(1, 2, 0))) #.numpy().astype(np.uint8)))
+                        plt.savefig("predicted_imgs/" + directory + "/epoch_" + str(epoch) + "_" + filename)
 
-                        plt.savefig("predicted_imgs/epoch_" + str(epoch) + "_" + filename)
+                        # plt.savefig("predicted_imgs/epoch_" + str(epoch) + "_" + filename)
                 val_loss += loss.item()
             print(f"validation loss is {val_loss / len(val_loader)}")
             val_losses.append(val_loss / len(val_loader))
@@ -378,7 +393,24 @@ if __name__ == "__main__":
         parser.add_argument('--pretrained', action='store_true',
                             help='True if you want to use pretrained model trained on synthetic dataset')
         args = parser.parse_args()
-        train(args.synthetic, args.pretrained)
+        timestamp = datetime.datetime.now()
+        # dataset_length = 2000
+        if args.synthetic:
+        # dataset_length = 1000
+        # train(args.synthetic, args.pretrained, dataset_length, "synthetic_" + str(dataset_length))
+        # dataset_length = 5000
+        # train(args.synthetic, args.pretrained, dataset_length, "synthetic_" + str(dataset_length))
+        # dataset_length = 10000
+        # train(args.synthetic, args.pretrained, dataset_length, "synthetic_" + str(dataset_length))
+            dataset_length = 20
+            train(args.synthetic, args.pretrained, dataset_length, "synthetic_" + str(dataset_length) + "_" + str(timestamp))
+        else:
+            dataset_length = 850
+            directory = "real_world_" + str(dataset_length) + "_" + str(timestamp)
+            if args.pretrained:
+                directory = "real_world_" + "pretrained_" + str(dataset_length) + "_" + str(timestamp)
+            train(args.synthetic, args.pretrained, dataset_length, directory)
+        # train(args.synthetic, args.pretrained, dataset_length=dataset_length, directory=)
 # TODO synthetic dataset!!!
 # TODO predicting too much points - solved??
 # TODO shape of gaussian?????? - bigger the better for convergence? 

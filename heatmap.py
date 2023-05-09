@@ -3,6 +3,7 @@ import numpy as np
 import cv2
 import os
 from matplotlib import pyplot as plt
+# import seaborn as sns
 import json
 import jsonlines
 from pathlib import Path
@@ -22,6 +23,7 @@ def get_mask(label_path):
         color = 255
         # single coord format is: start_point.x, start_point.y, end_point.x, end_point.y
         with open(label_path, 'r') as f:
+            # data loading and drawing lines
             data = json.load(f)
             left_coords = data["left_coords"]
             right_coords = data["right_coords"]
@@ -51,24 +53,44 @@ def get_mask(label_path):
                 #     # print("detected")
                 #     continue
                 cv2.line(right_mask, line_start, line_end, color, thickness)
-            yellow_lane = np.where(right_mask == 255)
-            _, right_indices = np.unique(yellow_lane[0], return_index=True)
-            r_indices = (yellow_lane[0][right_indices], yellow_lane[1][right_indices])
-            # print(f"image name is: {str(label_path).split('/')[-1]}")
-            left_mask = np.zeros((height, width), dtype=np.uint8)
-            right_mask = np.zeros((height, width), dtype=np.uint8)
-            left_mask[l_indices] = 255
+            
+            # first_one_right = np.argmax(right_mask, axis=1)
+            # modified_right_mask = []
+            # set_zero_indices = np.setdiff1d(np.arange(420), rows)
+            
+            # yellow_lane = np.where(right_mask == 255)
+            # _, right_indices = np.unique(yellow_lane[0], return_index=True)
+            # r_indices = (yellow_lane[0][right_indices], yellow_lane[1][right_indices])
+            # # print(f"image name is: {str(label_path).split('/')[-1]}")
+            # left_mask = np.zeros((height, width), dtype=np.uint8)
+            # right_mask = np.zeros((height, width), dtype=np.uint8)
+            # left_mask[l_indices] = 255
           
-            left_mask[l_indices] = 255
-            right_mask[r_indices] = 255
+            # left_mask[l_indices] = 255
+            # right_mask[r_indices] = 255
 
             # cv2.imwrite("visualise_labels/" + str(label_path).split("/")[-1] + ".png", left_mask + right_mask)
         mask = {}
-        left_mask[~rows] = 0
-        right_mask[~rows] = 0
+        first_one_indices = np.argmax(left_mask == 255, axis=1)
+
+# create a mask for all elements after the first occurrence of 1 in each row
+        # indices = np.arange(left_mask.shape[1]) > first_one_indices[:, np.newaxis]
+        # left_mask[indices] = 0
+        set_zero_indices = np.setdiff1d(np.arange(420), rows)
+        left_mask[set_zero_indices] = 0
+        left = np.zeros_like(left_mask)
+        idx = np.argmax(left_mask, axis=1)
+        left[np.arange(len(left_mask)), idx] = 255
+        # TODO!!!!!!!!!!!!!!!!!!!!!!!!!
+        left[:, 0] = 0
+        # print(f"ones in arr is {np.sum(left==1)}")
+        right_mask[set_zero_indices] = 0
+        right = np.zeros_like(right_mask)
+        right[np.arange(len(right_mask)), idx] = 255
+        right[:, 0] = 0
         # print(rows)
-        mask["left_lane"] = left_mask #[rows]
-        mask["right_lane"] = right_mask #[rows]
+        mask["left_lane"] = left #[rows]
+        mask["right_lane"] = right #[rows]
 
         return mask
 
@@ -114,7 +136,7 @@ def get_synt_mask_measurements(img_name):
 
                     # left_mask = cv2.resize(left_mask, (448, 448))
                     # left lane is already drawn
-                    blue_lane = np.argmax(left_mask, axis=1)
+                    # blue_lane = np.argmax(left_mask, axis=1)
 
                     right_mask = np.zeros((height, width), dtype=np.uint8)
 
@@ -131,32 +153,45 @@ def get_synt_mask_measurements(img_name):
                     right_mask = right_mask[300:720, :]
 
                     # right_mask = cv2.resize(right_mask, (448, 448))
-                    yellow_lane = np.argmax(right_mask, axis=1)
+                    # yellow_lane = np.argmax(right_mask, axis=1)
                     # for sure break and for time also
                     break
             # print(f"image name is: {img_name}")
         # TODO 419
-        blue_points = blue_lane[rows]
-
-        yellow_points = yellow_lane[rows]
-
-        blue_lane[~rows] = 0
-        yellow_lane[~rows] = 0
         mask = {}
-        mask["left_lane"] = left_mask #[rows]
-        mask["right_lane"] = right_mask #[rows]
+        set_zero_indices = np.setdiff1d(np.arange(420), rows)
+        left_mask[set_zero_indices] = 0
+        left = np.zeros_like(left_mask)
+        idx = np.argmax(left_mask, axis=1)
+        left[np.arange(len(left_mask)), idx] = 255
+        # TODO!!!!!!!!!!!!!!!!!!!!!!!!!
+        left[:, 0] = 0
+        # print(f"ones in arr is {np.sum(left==1)}")
+        right_mask[set_zero_indices] = 0
+        right = np.zeros_like(right_mask)
+        right[np.arange(len(right_mask)), idx] = 255
+        right[:, 0] = 0
+        # print(rows)
+        mask["left_lane"] = left #[rows]
+        mask["right_lane"] = right #[rows]
+
+        # ########
+        # blue_points = blue_lane[rows]
+
+        # yellow_points = yellow_lane[rows]
+
+        # blue_lane[~rows] = 0
+        # yellow_lane[~rows] = 0
+        # mask = {}
+        # mask["left_lane"] = left_mask #[rows]
+        # mask["right_lane"] = right_mask #[rows]
         # points = np.concatenate((blue_points, yellow_points), axis=0)
+        # WARNING idea is to null every point that is not involved in "rows"
         return mask
 
-def gaussian_k(x0,sigma, width):
-        """ Make a square gaussian kernel centered at (x0, y0) with sigma as SD.
-        """
-        x = np.arange(0, width, 1, float) ## (width,)
-        # print(f"width is {width}")
-        return np.exp(-(x - x0)**2 / (2 * sigma**2)) / (sigma * np.sqrt(2 * np.pi))
+
 
 def create_heatmap(mask, img_name):
-    
     # heatmap = gaussian_k(3, 5, 15)
     # print(heatmap)
     # cv2.imwrite('heatmap.png', heatmap)
@@ -187,84 +222,68 @@ def create_heatmap(mask, img_name):
 
     # heatmap = cv2.applyColorMap(cv_left_lane_mask, cv2.COLORMAP_JET)
     # print(mask)
+    # shape of mask is (420, 1280)
     left_lane_mask = mask["left_lane"]
-    ll = left_lane_mask
-    # print(left_lane_mask.shape)
-
-    # print(f"left heatmap shape is {left_heatmap.shape}")
-    # left_heatmap = cv2.applyColorMap(left_heatmap, cv2.COLORMAP_JET)
-    # Save the heatmap image
-    # cv2.imwrite('left_heatmap.png', left_heatmap)
-    # print(left_lane_mask.shape)
+    left_heatmap = cv2.GaussianBlur(left_lane_mask, (101, 101), 2)
+    # gauss_left_lane = []
+    # for row in left_lane_mask:
+    #     gauss_row = gaussian_k(left_lane_mask, 20,  left_lane_mask.shape[1])
+    #     gauss_left_lane.append(gauss_row)
+    plt.clf()
+    heatmap = plt.imshow(left_heatmap, cmap='hot', interpolation='nearest')
+    plt.colorbar(heatmap)
+    # plt.show()
+    plt.savefig("heatmaps_labels/left_" + img_name)
+    
+    
+    # print(f"shape of left lane mask is {left_lane_mask.shape}")
+    # ll = left_lane_mask
     right_lane_mask = mask["right_lane"]
-    ##################
-    # left_lane = np.empty((0, left_lane_mask.shape[1]))
-    # for row in left_lane_mask[rows]:
-    #     if 255 in row:
-    #         # TODO [0] for synthetic remove
-    #         idx = np.where(row == 255)[0][0]
-    #         # print(f"idx is {idx}")
-    #         # print(f"shape of row is {row.shape}")
-    #         row_heatmap = gaussian_k(idx, 20, left_lane_mask.shape[1])
-    #         # print(f"sum is {np.sum(row_heatmap)}")
-    #         if left_lane.shape[0] == 0:
-    #             left_lane = row_heatmap
-    #         else:
-    #             left_lane = np.vstack((left_lane, row_heatmap))
-    #     else:
-    #         # print("not in")
-    #         if left_lane.shape[0] == 0:
-    #             left_lane = row
-    #         else:
-    #             left_lane = np.vstack((left_lane, row))
-
-    # right_lane = np.empty((0, right_lane_mask.shape[1]))
-    # for row in right_lane_mask[rows]:
-    #     if 255 in row:
-    #         idx = np.where(row == 255)[0][0]
-    #         row_heatmap = gaussian_k(idx, 20, right_lane_mask.shape[1])
-    #         if right_lane.shape[0] == 0:
-    #             right_lane = row_heatmap
-    #         else:
-    #             right_lane = np.vstack((right_lane, row_heatmap))
-    #     else:
-    #         if right_lane.shape[0] == 0:
-    #             right_lane = row
-    #         else:
-    #             right_lane = np.vstack((right_lane, row))
-            # right_lane.append(row)
-    ##################
-    # print(f"shape of left lane is {right_lane.shape}")
-    # left_lane = np.array(left_lane)
-    # right_lane = np.array(right_lane)
-    kernel_size = 5
-    sigma = 180
-    kernel = cv2.getGaussianKernel(kernel_size, sigma).transpose()
+    right_heatmap = cv2.GaussianBlur(right_lane_mask, (101, 101), 2)
+    plt.clf()
+    heatmap = plt.imshow(right_heatmap, cmap='hot', interpolation='nearest')
+    plt.colorbar(heatmap)
+    # plt.show()
+    plt.savefig("heatmaps_labels/right" + img_name)
+    # applying Gaussian transformation to get heatmap
+    # Gauss setup
+    # kernel_size = 5
+    # sigma = 30
+    # kernel = cv2.getGaussianKernel(kernel_size, sigma).transpose()
+    # TODO why 0-1 doesnt work properly
     # kernel /= np.sum(kernel)
 
 
     # Apply the kernel to the image
     # mask = np.isin(np.arange(left_lane_mask.shape[0]), rows)
-    # left_lane_mask = np.where(mask[:, np.newaxis], left_lane_mask, 0)
-    left_heatmap = cv2.filter2D(left_lane_mask, -1, kernel)
+    # left_lane_mask = np.where(mask[:, np.newaxis], left_lane_
+    # mask, 0)
+    # Apply Gaussian kernel
+    # left_heatmap = cv2.filter2D(left_lane_mask, -1, kernel)
 
-    mask = np.isin(np.arange(right_lane_mask.shape[0]), rows)
-    right_lane_mask = np.where(mask[:, np.newaxis], right_lane_mask, 0)
-    right_heatmap = cv2.filter2D(right_lane_mask, -1, kernel)
+    # # mask = np.isin(np.arange(right_lane_mask.shape[0]), rows)
+    # # right_lane_mask = np.where(mask[:, np.newaxis], right_lane_mask, 0)
+    # right_heatmap = cv2.filter2D(right_lane_mask, -1, kernel)
     ##
-    plt.clf()
+    # plt.clf()
     # mask_array = cv2.GaussianBlur(ll, (201, 201), 2)
-    right_heatmap_sc = np.interp(left_heatmap, (left_heatmap.min(), left_heatmap.max()), (0, 1000))
-    heatmap = plt.imshow(right_heatmap_sc, cmap='hot', interpolation='nearest')
-    plt.colorbar(heatmap)
-    plt.show()
-    plt.savefig("ground_truth_heatmaps/" + img_name)
+    # Scaling values to 0-1000
+    # right_heatmap_sc = np.interp(left_heatmap, (left_heatmap.min(), left_heatmap.max()), (0, 1000))
+    # sns.heatmap(left_heatmap, cmap='viridis')
+    # plt.show()
+
+    # heatmap = plt.imshow(right_heatmap_sc, cmap='hot', interpolation='nearest')
+    # plt.colorbar(heatmap)
+    # plt.show()
+    # plt.savefig("ground_truth_heatmaps/" + img_name)
     ##
     left_heatmap = left_heatmap.reshape(420, 1280)
     right_heatmap = right_heatmap.reshape(420, 1280)
     # cv2.imwrite("before.png", left_heatmap)
+    # resizing - bag of tricks
     left_heatmap = cv2.resize(left_heatmap, (256, 420))
     right_heatmap = cv2.resize(right_heatmap, (256, 420))
+    # Scaling
     left_heatmap = np.interp(left_heatmap, (left_heatmap.min(), left_heatmap.max()), (0, 1000))
     right_heatmap = np.interp(right_heatmap, (right_heatmap.min(), right_heatmap.max()), (0, 1000))
     left_heatmap = left_heatmap[rows]
@@ -300,7 +319,7 @@ def create_heatmap(mask, img_name):
     return heatmap
 
 if __name__ == "__main__":
-    path_to_json = os.path.join("/home/capurjos/modified_labels/json_masks", "autox_try_1_czech430_0.json")
+    path_to_json = os.path.join("/home/josef/Documents/eforce/test_dtst/", "autox_try_1_czech430_0.json")
     mask = get_mask(path_to_json)
-    create_heatmap(mask)
+    create_heatmap(mask, "teest.png")
     # get_heatmap_points_from_label()
