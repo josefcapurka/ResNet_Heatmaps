@@ -86,18 +86,17 @@ def train(epochs: int, batch_sz: int, learning_rate:int, synthetic: bool,
     val_losses = []
 
     trn_dataset, val_dataset, _ = torch.utils.data.random_split(dataset, [trn_size, val_size, len(dataset) - trn_size - val_size])
-    # val_dataset = trn_dataset
     seed = 42
     torch.manual_seed(seed)
     random.seed(seed)
 
     trn_loader = torch.utils.data.DataLoader(trn_dataset,
                                              batch_size=batch_sz,
-                                             shuffle=True)
+                                             shuffle=True, drop_last=True)
 
     val_loader = torch.utils.data.DataLoader(val_dataset,
                                              batch_size=batch_sz,
-                                             shuffle=False)
+                                             shuffle=False, drop_last=True)
 
 
     device = torch.device("cuda")
@@ -157,7 +156,9 @@ def train(epochs: int, batch_sz: int, learning_rate:int, synthetic: bool,
                         pbar.set_postfix(**{'loss (batch)': loss.item()})
                         torch.cuda.empty_cache()
                         gc.collect()
+                    # This should not happen anymore due to drop_last=True argument
                     except RuntimeError:
+                        print("error occured")
                         continue
                 else:
                     try:
@@ -174,9 +175,19 @@ def train(epochs: int, batch_sz: int, learning_rate:int, synthetic: bool,
                         # nn.utils.clip_grad_value_(model.parameters(), clip_value=1.0)
                         optimizer.step()
                         train_loss += loss.item()
+                        pbar.update(images.shape[0])
+                        global_step += 1
+                        experiment.log({
+                                'train loss': loss.item(),
+                                'step': global_step,
+                                'epoch': epoch
+                            })
+                        # TODO do i need to explicitly tell that this part of code is from PyTorch UNET?
+                        pbar.set_postfix(**{'loss (batch)': loss.item()})
                         torch.cuda.empty_cache()
                         gc.collect()
                     except RuntimeError:
+                        print("error occured!")
                         continue
 
                 if i_batch % 10 == 0:
@@ -235,7 +246,8 @@ def train(epochs: int, batch_sz: int, learning_rate:int, synthetic: bool,
                         filename = filenames[i].split("/")[-1]
                         # TODO visualise heatmaps - in github older commits
 
-                        if epoch > 30:
+                        if epoch > 15:
+                            # TODO visualise only filtered parts of images if not penalizing everything...
                             scaling_param = 1280 / width
                             plt.clf()
                             plt.plot(left_lane_pts * scaling_param, rows, marker="o", markersize=5, markeredgecolor="red", markerfacecolor="green")
@@ -294,7 +306,10 @@ if __name__ == "__main__":
     # train(args.synthetic, args.pretrained, dataset_length, "synthetic_" + str(dataset_length))
     # TODO synthetic should work correctly
         dataset_length = 1000
-        train(args.synthetic, args.pretrained, dataset_length, "synthetic_" + str(dataset_length) + "_" + str(timestamp))
+        directory = "synthetic_" + str(dataset_length) + "_" + str(timestamp)
+        train(args.epochs, args.batch_size, args.lr, args.synthetic,
+          args.pretrained, dataset_length, directory, args.scale, args.penalize, experiment)
+        # train(args.synthetic, args.pretrained, dataset_length, "synthetic_" + str(dataset_length) + "_" + str(timestamp))
     else:
         dataset_length = 850
         directory = "real_world_" + str(dataset_length) + "_" + str(timestamp)
