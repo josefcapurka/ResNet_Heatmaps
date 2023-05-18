@@ -96,14 +96,14 @@ def get_mask(label_path):
 
         return mask
 
-def get_synt_mask_measurements(img_name):
+def get_synt_mask_measurements(img_name, mask_dir):
         img_name = img_name.split("/")[-1]
         # example of img_name: run_261_000008
         # print(img_name)
         run_number = img_name.split("_")[1]
         # print(f"run number is {run_number}")
         img_id = img_name.split("_")[2][0:-4]
-        dir_mask = Path('/home/capurjos/synt_data/labels')
+        dir_mask = Path(mask_dir)
         jsonl_path = os.path.join(dir_mask, "labels_run_" + run_number + ".jsonl")
         # print(f"path to json is {jsonl_path}")
         height = 720
@@ -195,7 +195,7 @@ def create_heatmap(mask, img_name):
     # plt.savefig("heatmaps_labels/right" + img_name)
 
     # bag of tricks
-    height, width = (420, 640)
+    height, width = (420, 320)
     # TODO visualise heatmaps after this..
     left_heatmap = cv2.resize(left_heatmap, (width, height), interpolation=cv2.INTER_NEAREST)
     right_heatmap = cv2.resize(right_heatmap, (width, height), interpolation=cv2.INTER_NEAREST)

@@ -267,7 +267,7 @@ class fsDataset(Dataset):
             # print(f"filename is {str(img_file[0])}")
             img = img[300:719, :, :]
             # print(img.shape)
-            mask = get_synt_mask_measurements(str(img_file[0]))
+            mask = get_synt_mask_measurements(str(img_file[0]), self.mask_dir)
         else:
             mask = get_mask(mask_file[0])
         heatmap = create_heatmap(mask, str(img_file[0]).split("/")[-1])

@@ -20,6 +20,8 @@ import argparse
 import cv2
 import os
 import datetime
+from unet_model import UNet
+from torchinfo import summary
 
 # import torchvision.models as models
 
@@ -83,10 +85,10 @@ class ResNet50NoAvgPool(nn.Module):
     def __init__(self):
         super(ResNet50NoAvgPool, self).__init__()
         # Load the original ResNet50 model
-        resnet50 = torch.hub.load('pytorch/vision:v0.10.0', 'resnet34', pretrained=False)
+        resnet50 = torch.hub.load('pytorch/vision:v0.10.0', 'resnet18', pretrained=False)
         # Remove the last layer (avgpool + fc) from the original ResNet50 model
         self.features = nn.Sequential(*list(resnet50.children())[:-1])
-        width = 1280
+        width = 320
         num_segments_per_line = 5
         print(2 * num_segments_per_line * width)
         self.l1 = torch.nn.Linear(286720, 2 * num_segments_per_line * width)
@@ -134,7 +136,7 @@ def train(synthetic: bool, pretrained: bool, dataset_length, directory):
         # dir_img = Path('/home/capurjos/synt_data/imgs')
         # dir_mask = Path('/home/capurjos/synt_data/labels')
         dir_img = Path('/home/capurjos/synthetic_dataset/minimal_synthetic/imgs')
-        dir_mask = Path('/home/capurjos/synthetic_datast/minimal_synthetic/labels')
+        dir_mask = Path('/home/capurjos/synthetic_dataset/minimal_synthetic/labels')
     else:
         dir_img = Path('/home/capurjos/modified_labels/imgs')
         dir_mask = Path('/home/capurjos/modified_labels/json_masks')
@@ -171,8 +173,13 @@ def train(synthetic: bool, pretrained: bool, dataset_length, directory):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("using device {0}".format(device))
-    model = torch.hub.load('pytorch/vision:v0.10.0', 'resnet34', weights=None).to(device)
-    model.avgpool = nn.AdaptiveAvgPool2d(output_size=(4, 4))
+    model = torch.hub.load('pytorch/vision:v0.10.0', 'resnet18').to(device)
+    model.avgpool = nn.AdaptiveAvgPool2d(output_size=(5, 5)).to(device)
+    # model = UNet(3, 1).to(device)
+    ###
+    
+    
+    
     # model = ResNet50NoAvgPool().to(device)
     # model.features = nn.Sequential(*list(model.features._modules.values())[:-1])
     # # model = ResNet18_noavgpool().to(device)
@@ -180,17 +187,20 @@ def train(synthetic: bool, pretrained: bool, dataset_length, directory):
 
 
     num_ftrs = model.fc.in_features
-    width = 640
+    width = 320
     height = 419
+    num_channels = 3
     # print(f"input number of neurons in last layer is {25088, 2 * num_segments_per_line * width}")
 
-    model.fc = nn.Linear(8192 , 2 * num_segments_per_line * width).to(device)
+    model.fc = nn.Linear(12800 , 2 * num_segments_per_line * width).to(device)
+    summary(model, input_size=(batch_sz, num_channels, 420, 1280))
 
     # print(model)
 
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     # criterion = nn.MSELoss()
     criterion = HeatmapLoss()
+    # criterion = nn.CrossEntropyLoss()
     # criterion = nn.L1Loss()
     # criterion = RMSLELoss()
     rows = np.linspace(height, 0, num_segments_per_line).astype(int)
@@ -212,26 +222,28 @@ def train(synthetic: bool, pretrained: bool, dataset_length, directory):
             # print(f" heatmaps are the same: {left_lane_heatmap.argmax(axis=2).unique() == right_lane_heatmap.argmax(axis=2).unique()}")
             images, left_lane_heatmap, right_lane_heatmap = images.to(device), left_lane_heatmap.to(device), right_lane_heatmap.to(device)
             net_output = model(images).float()
-            if args.synthetic:
-                # TODO check!!!
-                left_indices = torch.where(left_lane_heatmap.argmax(axis=2) > 2)
-                right_indices = torch.where((right_lane_heatmap.argmax(axis=2) < 637) & (right_lane_heatmap.argmax(axis=2) > 2))
-                try:
-                    left_lane_nn_output, right_lane_nn_output = np.split(net_output, 2, axis=1)
-                    left_lane_nn_output = left_lane_nn_output.reshape(batch_sz, 20, width)
-                    right_lane_nn_output = right_lane_nn_output.reshape(batch_sz, 20, width)
-                    loss = criterion(left_lane_nn_output[left_indices].flatten(), left_lane_heatmap[left_indices].flatten())
-                    loss += criterion(right_lane_nn_output[right_indices].flatten(), right_lane_heatmap[right_indices].flatten())
-                    optimizer.zero_grad()
-                    loss.backward()
-                    # TODO
-                    # nn.utils.clip_grad_value_(model.parameters(), clip_value=1.0)
-                    optimizer.step()
-                    train_loss += loss.item()
-                    torch.cuda.empty_cache()
-                    gc.collect()
-                except RuntimeError:
-                    continue
+            if False:
+                pass
+            # if args.synthetic:
+            #     # TODO check!!!
+            #     left_indices = torch.where(left_lane_heatmap.argmax(axis=2) > 2)
+            #     right_indices = torch.where((right_lane_heatmap.argmax(axis=2) < 1278) & (right_lane_heatmap.argmax(axis=2) > 2))
+            #     try:
+            #         left_lane_nn_output, right_lane_nn_output = np.split(net_output, 2, axis=1)
+            #         left_lane_nn_output = left_lane_nn_output.reshape(batch_sz, 20, width)
+            #         right_lane_nn_output = right_lane_nn_output.reshape(batch_sz, 20, width)
+            #         loss = criterion(left_lane_nn_output[left_indices].flatten(), left_lane_heatmap[left_indices].flatten())
+            #         loss += criterion(right_lane_nn_output[right_indices].flatten(), right_lane_heatmap[right_indices].flatten())
+            #         optimizer.zero_grad()
+            #         loss.backward()
+            #         # TODO
+            #         # nn.utils.clip_grad_value_(model.parameters(), clip_value=1.0)
+            #         optimizer.step()
+            #         train_loss += loss.item()
+            #         torch.cuda.empty_cache()
+            #         gc.collect()
+            #     except RuntimeError:
+            #         continue
 
 
 
@@ -273,7 +285,7 @@ def train(synthetic: bool, pretrained: bool, dataset_length, directory):
             # if epoch < 25:
             #     continue
             # TODO switch to val_loader
-            for i_batch, batch in enumerate(trn_loader):
+            for i_batch, batch in enumerate(val_loader):
                 images = batch["image"]
                 left_lane_heatmap = batch["left_lane_heatmap"].float()
                 right_lane_heatmap = batch["right_lane_heatmap"].float()
@@ -348,13 +360,14 @@ def train(synthetic: bool, pretrained: bool, dataset_length, directory):
 
                     #     plt.savefig("heatmaps/" + directory + "/right_heatmap_epoch_" + str(epoch) + "_" + filename)
 
-                    if epoch > 0:
+                    if epoch > 30:
+                        scaling_param = 1280 / width
                         # plot_imgs(images[i], pred_left_lane, pred_right_lane, true_left_lane, true_right_lane, rows, indices, epoch)
                         plt.clf()
-                        plt.plot(left_lane_pts * 2, rows, marker="o", markersize=5, markeredgecolor="red", markerfacecolor="green")
-                        plt.plot(right_lane_pts * 2, rows,  marker="o", markersize=5, markeredgecolor="red", markerfacecolor="green")
-                        plt.plot(left_lane_heatmap[i].argmax(axis=1) * 2, rows, "b")
-                        plt.plot(right_lane_heatmap[i].argmax(axis=1) * 2, rows, "y")
+                        plt.plot(left_lane_pts * scaling_param, rows, marker="o", markersize=5, markeredgecolor="red", markerfacecolor="green")
+                        plt.plot(right_lane_pts * scaling_param, rows,  marker="o", markersize=5, markeredgecolor="red", markerfacecolor="green")
+                        plt.plot(left_lane_heatmap[i].argmax(axis=1) * scaling_param, rows, "b")
+                        plt.plot(right_lane_heatmap[i].argmax(axis=1) * scaling_param, rows, "y")
                         # print(f"right lane heatmap is {left_lane_heatmap[i].argmax(axis=1)}")
                     # i_indices = indices.cpu()
                     # print(indices.size())
@@ -374,7 +387,7 @@ def train(synthetic: bool, pretrained: bool, dataset_length, directory):
                 plot_losses(epoch, train_losses, val_losses)
             except:
                 pass
-
+        # TODO save the best model
         torch.save(model.state_dict(), "model.pt")
 
 
