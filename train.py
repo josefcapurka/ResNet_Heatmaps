@@ -51,16 +51,18 @@ def plot_imgs(image, pred_left_lane, pred_right_lane, true_left_lane, true_right
 
 
 
-
+"""
+The training process lacks this functionality:
+1. Scaling images
+2. Correctly preprocessed heatmaps so the y points that do not have corresponding x points are penalized
+3. In comparison with ResNet-points method, we should scale to same size and use same architecture of ResNet;
+i.e. 50 or this, i.e. 18
+"""
 
 def train(epochs: int, batch_sz: int, learning_rate:int, synthetic: bool,
           pretrained: bool, dataset_length: int, directory: str, img_scale: float, penalize_undefined_parts: bool, experiment):
 
-    torch.cuda.empty_cache()
-    gc.collect()
 
-    # dir_img = Path('/home/capurjos/Pytorch-UNet/cropped_imgs_raw/imgs')
-    # dir_mask = Path('/home/capurjos/Pytorch-UNet/cropped_imgs_raw/masks')
     if synthetic:
         # dir_img = Path('/home/capurjos/synt_data/imgs')
         # dir_mask = Path('/home/capurjos/synt_data/labels')
@@ -70,7 +72,6 @@ def train(epochs: int, batch_sz: int, learning_rate:int, synthetic: bool,
         dir_img = Path('/home/capurjos/modified_labels/imgs')
         dir_mask = Path('/home/capurjos/modified_labels/json_masks')
 
-    # os.mkdir("losses/" + directory)
     os.mkdir("predicted_imgs/" + directory)
     # os.mkdir("smooth_grad_heatmaps/" + directory)
 
@@ -78,7 +79,6 @@ def train(epochs: int, batch_sz: int, learning_rate:int, synthetic: bool,
     dataset = fsDataset(dir_img, dir_mask, synthetic)
 
     trn_size = int(0.9 * dataset_length)
-    # trn_size = 5000
     val_size = int(0.1 * dataset_length)
 
     print_log_info(dataset, trn_size, val_size)
@@ -100,25 +100,15 @@ def train(epochs: int, batch_sz: int, learning_rate:int, synthetic: bool,
                                              shuffle=False)
 
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print("using device {0}".format(device))
-    model = torch.hub.load('pytorch/vision:v0.10.0', 'resnet18').to(device)
-    model.avgpool = nn.AdaptiveAvgPool2d(output_size=(5, 5)).to(device)
-    # model = UNet(3, 1).to(device)
-
-    # model = ResNet50NoAvgPool().to(device)
-    # model.features = nn.Sequential(*list(model.features._modules.values())[:-1])
-    # # model = ResNet18_noavgpool().to(device)
-    # # model = ModifiedUNet
-
-
-    num_ftrs = model.fc.in_features
+    device = torch.device("cuda")
     width = 320
     height = 419
     num_channels = 3
-    # print(f"input number of neurons in last layer is {25088, 2 * num_segments_per_line * width}")
-
+    print("using device {0}".format(device))
+    model = torch.hub.load('pytorch/vision:v0.10.0', 'resnet18').to(device)
+    model.avgpool = nn.AdaptiveAvgPool2d(output_size=(5, 5)).to(device)
     model.fc = nn.Linear(12800 , 2 * num_segments_per_line * width).to(device)
+
     summary(model, input_size=(batch_sz, num_channels, 420, 1280))
     if penalize_undefined_parts:
         print("Penalizing all parts in the image..")
@@ -128,7 +118,6 @@ def train(epochs: int, batch_sz: int, learning_rate:int, synthetic: bool,
     criterion = nn.MSELoss()
     # criterion = nn.CrossEntropyLoss()
     # criterion = nn.L1Loss()
-    # criterion = RMSLELoss()
     rows = np.linspace(height, 0, num_segments_per_line).astype(int)
     global_step = 0
     for epoch in range(1, epochs + 1):
@@ -137,21 +126,16 @@ def train(epochs: int, batch_sz: int, learning_rate:int, synthetic: bool,
         train_loss = 0.0
         with tqdm(total=trn_size, desc=f'Epoch {epoch}/{epochs}', unit='img') as pbar:
             for i_batch, batch in enumerate(trn_loader):
-                # print(f"Epoch {epoch}. Batch: {i_batch}")
+
                 images = batch["image"]
                 filenames = batch["filename"]
-                # points = batch["left_lane_heatmap"].float()
                 # create 1D gaussian for each point, so each point of lane is represented as 1x1280
                 left_lane_heatmap = batch["left_lane_heatmap"].float()
-                # print(f"left lane gt heatmap shape is {left_lane_heatmap.shape}")
                 right_lane_heatmap = batch["right_lane_heatmap"].float()
-
-                # print(f" heatmaps are the same: {left_lane_heatmap.argmax(axis=2).unique() == right_lane_heatmap.argmax(axis=2).unique()}")
                 images, left_lane_heatmap, right_lane_heatmap = images.to(device), left_lane_heatmap.to(device), right_lane_heatmap.to(device)
                 net_output = model(images).float()
                 if penalize_undefined_parts:
                     try:
-                        # print("loss for rw dataset")
                         left_lane_nn_output, right_lane_nn_output = np.split(net_output, 2, axis=1)
                         left_lane_nn_output = left_lane_nn_output.reshape(batch_sz, 20, width)
                         right_lane_nn_output = right_lane_nn_output.reshape(batch_sz, 20, width)
@@ -175,7 +159,6 @@ def train(epochs: int, batch_sz: int, learning_rate:int, synthetic: bool,
                         gc.collect()
                     except RuntimeError:
                         continue
-        
                 else:
                     try:
                         left_indices = torch.where(left_lane_heatmap.argmax(axis=2) > 2)
@@ -183,11 +166,6 @@ def train(epochs: int, batch_sz: int, learning_rate:int, synthetic: bool,
                         left_lane_nn_output, right_lane_nn_output = np.split(net_output, 2, axis=1)
                         left_lane_nn_output = left_lane_nn_output.reshape(batch_sz, 20, width)
                         right_lane_nn_output = right_lane_nn_output.reshape(batch_sz, 20, width)
-                        # print(f"left lane nn output is {left_lane_nn_output.shape}")
-                        # print(f"left heatmap outpit shape is {left_lane_heatmap.shape}")
-                        # print(left_lane_nn_output[left_indices].shape)
-                        # print(f"shape of nn left output is: {left_lane_nn_output.flatten().shape}")
-                        # print(f"shape of left lane heatmap is {left_lane_heatmap.flatten().shape}")
                         loss = criterion(left_lane_nn_output[left_indices].flatten(), left_lane_heatmap[left_indices].flatten())
                         loss += criterion(right_lane_nn_output[right_indices].flatten(), right_lane_heatmap[right_indices].flatten())
                         optimizer.zero_grad()
@@ -201,16 +179,6 @@ def train(epochs: int, batch_sz: int, learning_rate:int, synthetic: bool,
                     except RuntimeError:
                         continue
 
-
-
-                # plt.savefig("predicted_imgs/epoch_" + str(epoch) + "_" + str(random.randint(0, 900)) + ".png")
-                # loss = criterion(net_output[indices], points[indices])
-                # left_lane_nn_output.shape is width * 30
-                # print(net_output.shape)
-                # TODO check if this works correctly for batch > 1
-
-
-
                 if i_batch % 10 == 0:
                     print('[TRN] Train epoch: {}, batch: {}\tLoss: {:.4f}'.format(
                         epoch, i_batch, loss.item()))
@@ -220,35 +188,24 @@ def train(epochs: int, batch_sz: int, learning_rate:int, synthetic: bool,
             model.eval()
 
             val_loss = 0.0
-            # TODO again penalizing parts etc.
             with torch.no_grad():
-                # if epoch < 25:
-                #     continue
-                # TODO switch to val_loader
                 for i_batch, batch in enumerate(val_loader):
                     images = batch["image"]
                     left_lane_heatmap = batch["left_lane_heatmap"].float()
                     right_lane_heatmap = batch["right_lane_heatmap"].float()
-                    # print(f"left lane heatmap is {left_lane_heatmap.unique()}")
-                    # print(f"right lane heatmap is {right_lane_heatmap.unique()}")
                     filenames = batch["filename"][0]
 
                     images, left_lane_heatmap, right_lane_heatmap = images.to(device), left_lane_heatmap.to(device), right_lane_heatmap.to(device)
                     net_output = model(images).float()
                     left_lane_nn_output, right_lane_nn_output = np.split(net_output, 2, axis=1)
-                    ##########
-                    # : tuple(torch.tensor, torch.tensor)
                     left_indices = torch.where(left_lane_heatmap.argmax(axis=2) > 2)
                     right_indices = torch.where((right_lane_heatmap.argmax(axis=2) < width - 1) & (right_lane_heatmap.argmax(axis=2) > 2))
-                    # print(f"net output shape is {net_output.shape}")
                     left_lane_nn_output, right_lane_nn_output = np.split(net_output, 2, axis=1)
                     try:
                         left_lane_nn_output = left_lane_nn_output.reshape(batch_sz, 20, width)
                         right_lane_nn_output = right_lane_nn_output.reshape(batch_sz, 20, width)
                     except RuntimeError:
                         continue
-
-                    ###########
 
                     if penalize_undefined_parts:
                         loss = criterion(left_lane_nn_output.flatten(), left_lane_heatmap.flatten())
@@ -262,51 +219,21 @@ def train(epochs: int, batch_sz: int, learning_rate:int, synthetic: bool,
                                     'epoch': epoch,
                                     'validation loss': loss.item()
                                 })
-                    # indices = torch.where(points > 2)
-                    # # todo...
-                    # loss = criterion(net_output[indices], points[indices])
 
-                    # if i_batch % 3 > 0:
-                        # print(f"length of images is {len(images)}")
-                    # left_indices = left_indices.cpu()
-                    # right_indices = right_indices.cpu()
+
                     left_lane_heatmap = left_lane_heatmap.cpu()
                     right_lane_heatmap = right_lane_heatmap.cpu()
-                    # print(f"shape of left lane heatmap is {left_lane_heatmap.shape}")
-                    # print(f"shape of left indices is {left_indices}")
                     for i in range(len(images)):
+                        # TODO this should be probably in epoch > 30 part
                         prediction = net_output[i].cpu()
-                        # TODO why [1] index?
-                        # cur_left_indices = left_indices[1][np.where(left_indices[0].cpu() == i)].cpu()
-
                         pred_left_lane, pred_right_lane = np.split(prediction, 2)
                         pred_left_lane = pred_left_lane.reshape(20, width)
                         pred_right_lane = pred_right_lane.reshape(20, width)
                         left_lane_pts = np.argmax(pred_left_lane, axis=1)
                         right_lane_pts = np.argmax(pred_right_lane, axis=1)
-                        # left_heatmap_mask = np.zeros((256, 420))
-                        # # TODO probably wont work
-                        # left_heatmap_mask[[rows], :] = pred_left_lane
-                        # right_heatmap_mask = np.zeros((256, 420))
-                        # right_heatmap_mask[[rows], :] = pred_right_lane
-                        # # print(filenames)
-                        # # TODO maybe use cv2.resize
-                        # left_heatmap_mask = left_heatmap_mask.resize(420, 1280)
-                        # right_heatmap_mask = right_heatmap_mask.resize(420, 1280)
-                        filename = filenames[i].split("/")[-1]
-                        # if epoch > 10:
-                        #     plt.clf()
-                        #     heatmap = plt.imshow(left_heatmap_mask, cmap='hot', interpolation='nearest')
-                        #     plt.colorbar(heatmap)
-                        #     # plt.show()
-                        #     plt.savefig("heatmaps/" + directory + "/left_heatmap_epoch_" + str(epoch) + "_" + filename)
-                        #     # ---
-                        #     plt.clf()
-                        #     heatmap = plt.imshow(right_heatmap_mask, cmap='hot', interpolation='nearest')
-                        #     plt.colorbar(heatmap)
-                        #     # plt.show()
 
-                        #     plt.savefig("heatmaps/" + directory + "/right_heatmap_epoch_" + str(epoch) + "_" + filename)
+                        filename = filenames[i].split("/")[-1]
+                        # TODO visualise heatmaps - in github older commits
 
                         if epoch > 30:
                             scaling_param = 1280 / width
@@ -365,6 +292,7 @@ if __name__ == "__main__":
     # train(args.synthetic, args.pretrained, dataset_length, "synthetic_" + str(dataset_length))
     # dataset_length = 10000
     # train(args.synthetic, args.pretrained, dataset_length, "synthetic_" + str(dataset_length))
+    # TODO synthetic should work correctly
         dataset_length = 1000
         train(args.synthetic, args.pretrained, dataset_length, "synthetic_" + str(dataset_length) + "_" + str(timestamp))
     else:
@@ -375,8 +303,6 @@ if __name__ == "__main__":
         # TODO heatmaps currently not support penalizing undefined parts and scaling images.. change!!
         train(args.epochs, args.batch_size, args.lr, args.synthetic,
           args.pretrained, dataset_length, directory, args.scale, args.penalize, experiment)
-        # train(args.synthetic, args.pretrained, dataset_length, directory)
-    # train(args.synthetic, args.pretrained, dataset_length=dataset_length, directory=)
 
 
 
