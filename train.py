@@ -50,55 +50,6 @@ def plot_imgs(image, pred_left_lane, pred_right_lane, true_left_lane, true_right
     plt.savefig("predicted_imgs/epoch_" + str(epoch) + "_" + str(random.randint(0, 900)) + ".png")
 
 
-# def plot_losses(epoch, train_losses, val_losses):
-#     plt.clf()
-#     plt.plot(range(1,epoch + 1),train_losses,'b-',label='train_loss')
-#     plt.plot(range(1,epoch + 1),val_losses,'g-',label='val_loss')
-#     plt.legend(loc='best')
-#     plt.xlabel('Epochs')
-#     plt.ylabel('Loss')
-#     # plt.show()
-#     plt.savefig("losses/" + str(epoch) + "_" + "losses" + ".png")
-
-# class ResNet18_noavgpool(torch.nn.Module):
-#     def __init__(self):
-#         super(ResNet18_noavgpool, self).__init__()
-#         # TODO resnet 50
-#         # resnet18 = models.resnet50(pretrained=True)
-#         self.resnet18 = models.resnet18(pretrained=True)
-#         self.features = torch.nn.Sequential(*list(self.resnet18.children())[:-2])
-#         width = 1280
-#         num_segments_per_line = 2
-#         print(2 * num_segments_per_line * width)
-#         self.l1 = torch.nn.Linear(2048, 2 * num_segments_per_line * width)
-#         # self.l2 = torch.nn.Linear(90000, 60)
-#         # self.classifier = torch.nn.Linear(1146880 , 60)
-
-#     def forward(self, x):
-#         x = self.features(x)
-#         x = x.view(x.size(0), -1)
-#         x = self.l1(x)
-#         # x = self.l2(x)
-#         return x
-
-
-# class ResNet50NoAvgPool(nn.Module):
-#     def __init__(self):
-#         super(ResNet50NoAvgPool, self).__init__()
-#         # Load the original ResNet50 model
-#         resnet50 = torch.hub.load('pytorch/vision:v0.10.0', 'resnet18', pretrained=False)
-#         # Remove the last layer (avgpool + fc) from the original ResNet50 model
-#         self.features = nn.Sequential(*list(resnet50.children())[:-1])
-#         width = 320
-#         num_segments_per_line = 5
-#         print(2 * num_segments_per_line * width)
-#         self.l1 = torch.nn.Linear(286720, 2 * num_segments_per_line * width)
-
-#     def forward(self, x):
-#         x = self.features(x)
-#         x = x.view(x.size(0), -1)
-#         x = self.l1(x)
-#         return x
 
 
 
@@ -119,10 +70,10 @@ def train(epochs: int, batch_sz: int, learning_rate:int, synthetic: bool,
         dir_img = Path('/home/capurjos/modified_labels/imgs')
         dir_mask = Path('/home/capurjos/modified_labels/json_masks')
 
-    os.mkdir("losses/" + directory)
+    # os.mkdir("losses/" + directory)
     os.mkdir("predicted_imgs/" + directory)
     # os.mkdir("smooth_grad_heatmaps/" + directory)
-    img_scale = 1
+
     num_segments_per_line = 20
     dataset = fsDataset(dir_img, dir_mask, synthetic)
 
@@ -169,7 +120,8 @@ def train(epochs: int, batch_sz: int, learning_rate:int, synthetic: bool,
 
     model.fc = nn.Linear(12800 , 2 * num_segments_per_line * width).to(device)
     summary(model, input_size=(batch_sz, num_channels, 420, 1280))
-
+    if penalize_undefined_parts:
+        print("Penalizing all parts in the image..")
     # print(model)
 
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
@@ -225,27 +177,29 @@ def train(epochs: int, batch_sz: int, learning_rate:int, synthetic: bool,
                         continue
         
                 else:
-                   pass
-                    # if args.synthetic:
-                #     # TODO check!!!
-                #     left_indices = torch.where(left_lane_heatmap.argmax(axis=2) > 2)
-                #     right_indices = torch.where((right_lane_heatmap.argmax(axis=2) < 1278) & (right_lane_heatmap.argmax(axis=2) > 2))
-                #     try:
-                #         left_lane_nn_output, right_lane_nn_output = np.split(net_output, 2, axis=1)
-                #         left_lane_nn_output = left_lane_nn_output.reshape(batch_sz, 20, width)
-                #         right_lane_nn_output = right_lane_nn_output.reshape(batch_sz, 20, width)
-                #         loss = criterion(left_lane_nn_output[left_indices].flatten(), left_lane_heatmap[left_indices].flatten())
-                #         loss += criterion(right_lane_nn_output[right_indices].flatten(), right_lane_heatmap[right_indices].flatten())
-                #         optimizer.zero_grad()
-                #         loss.backward()
-                #         # TODO
-                #         # nn.utils.clip_grad_value_(model.parameters(), clip_value=1.0)
-                #         optimizer.step()
-                #         train_loss += loss.item()
-                #         torch.cuda.empty_cache()
-                #         gc.collect()
-                #     except RuntimeError:
-                #         continue
+                    try:
+                        left_indices = torch.where(left_lane_heatmap.argmax(axis=2) > 2)
+                        right_indices = torch.where((right_lane_heatmap.argmax(axis=2) < 1277) & (right_lane_heatmap.argmax(axis=2) > 2))
+                        left_lane_nn_output, right_lane_nn_output = np.split(net_output, 2, axis=1)
+                        left_lane_nn_output = left_lane_nn_output.reshape(batch_sz, 20, width)
+                        right_lane_nn_output = right_lane_nn_output.reshape(batch_sz, 20, width)
+                        # print(f"left lane nn output is {left_lane_nn_output.shape}")
+                        # print(f"left heatmap outpit shape is {left_lane_heatmap.shape}")
+                        # print(left_lane_nn_output[left_indices].shape)
+                        # print(f"shape of nn left output is: {left_lane_nn_output.flatten().shape}")
+                        # print(f"shape of left lane heatmap is {left_lane_heatmap.flatten().shape}")
+                        loss = criterion(left_lane_nn_output[left_indices].flatten(), left_lane_heatmap[left_indices].flatten())
+                        loss += criterion(right_lane_nn_output[right_indices].flatten(), right_lane_heatmap[right_indices].flatten())
+                        optimizer.zero_grad()
+                        loss.backward()
+                        # TODO
+                        # nn.utils.clip_grad_value_(model.parameters(), clip_value=1.0)
+                        optimizer.step()
+                        train_loss += loss.item()
+                        torch.cuda.empty_cache()
+                        gc.collect()
+                    except RuntimeError:
+                        continue
 
 
 
@@ -266,6 +220,7 @@ def train(epochs: int, batch_sz: int, learning_rate:int, synthetic: bool,
             model.eval()
 
             val_loss = 0.0
+            # TODO again penalizing parts etc.
             with torch.no_grad():
                 # if epoch < 25:
                 #     continue
@@ -295,9 +250,12 @@ def train(epochs: int, batch_sz: int, learning_rate:int, synthetic: bool,
 
                     ###########
 
-
-                    loss = criterion(left_lane_nn_output.flatten(), left_lane_heatmap.flatten())
-                    loss += criterion(right_lane_nn_output.flatten(), right_lane_heatmap.flatten())
+                    if penalize_undefined_parts:
+                        loss = criterion(left_lane_nn_output.flatten(), left_lane_heatmap.flatten())
+                        loss += criterion(right_lane_nn_output.flatten(), right_lane_heatmap.flatten())
+                    else:
+                        loss = criterion(left_lane_nn_output[left_indices].flatten(), left_lane_heatmap[left_indices].flatten())
+                        loss += criterion(right_lane_nn_output[right_indices].flatten(), right_lane_heatmap[right_indices].flatten())
                     experiment.log({
                                     'learning rate': optimizer.param_groups[0]['lr'],
                                     'step': global_step,
@@ -352,33 +310,32 @@ def train(epochs: int, batch_sz: int, learning_rate:int, synthetic: bool,
 
                         if epoch > 30:
                             scaling_param = 1280 / width
-                            # plot_imgs(images[i], pred_left_lane, pred_right_lane, true_left_lane, true_right_lane, rows, indices, epoch)
                             plt.clf()
                             plt.plot(left_lane_pts * scaling_param, rows, marker="o", markersize=5, markeredgecolor="red", markerfacecolor="green")
                             plt.plot(right_lane_pts * scaling_param, rows,  marker="o", markersize=5, markeredgecolor="red", markerfacecolor="green")
                             plt.plot(left_lane_heatmap[i].argmax(axis=1) * scaling_param, rows, "b")
                             plt.plot(right_lane_heatmap[i].argmax(axis=1) * scaling_param, rows, "y")
-                            # print(f"right lane heatmap is {left_lane_heatmap[i].argmax(axis=1)}")
-                        # i_indices = indices.cpu()
-                        # print(indices.size())
-                        # return
-                        # plt.plot(pred_left_lane[indices], rows[indices], marker="o", markersize=5, markeredgecolor="red", markerfacecolor="green")
-                        # plt.plot(pred_right_lane[indices], rows[indices],  marker="o", markersize=5, markeredgecolor="red", markerfacecolor="green")
-                        # plt.plot(true_left_lane[indices], rows[indices], "b", true_right_lane[indices], rows[indices], "y")
-
                             plt.imshow((images[i].cpu().permute(1, 2, 0))) #.numpy().astype(np.uint8)))
                             plt.savefig("predicted_imgs/" + directory + "/epoch_" + str(epoch) + "_" + filename)
 
-                            # plt.savefig("predicted_imgs/epoch_" + str(epoch) + "_" + filename)
                     val_loss += loss.item()
                 try:
                     print(f"Validation loss per epoch is {val_loss / len(val_loader)}")
                     val_losses.append(val_loss / len(val_loader))
-                    # plot_losses(epoch, train_losses, val_losses)
-                except:
-                    pass
-        # TODO save the best model
-        torch.save(model.state_dict(), "model.pt")
+                except ZeroDivisionError:
+                    print(f"Length of validation dataset is zero.")
+        # TODO synthetic and real_world should have this directory in losses etc.
+        if synthetic:
+            path_to_model = "models/synthetic/" + directory
+        else:
+            path_to_model = "models/real_world/" + directory
+
+        try:
+            if val_losses[-1] == min(val_losses):
+                torch.save(model.state_dict(), path_to_model + "_model_best_epoch_" + str(epoch) + ".pt")
+        except:
+            pass
+        torch.save(model.state_dict(), path_to_model + "_model_epoch_" + str(epoch) + ".pt")
 
 
 if __name__ == "__main__":
