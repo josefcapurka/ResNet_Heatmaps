@@ -60,6 +60,9 @@ def predict_imgs():
             # lambda x: x*255
         ])
     print(type(args.input_dir))
+    """
+    1. output from nn is 
+    """
     with torch.no_grad():
     
         for filename in os.listdir(args.input_dir):

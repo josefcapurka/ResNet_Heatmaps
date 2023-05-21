@@ -60,14 +60,16 @@ i.e. 50 or this, i.e. 18
 """
 
 def train(epochs: int, batch_sz: int, learning_rate:int, synthetic: bool,
-          pretrained: bool, dataset_length: int, directory: str, img_scale: float, penalize_undefined_parts: bool, experiment):
+          pretrained: bool, dataset_length: int, directory: str, img_scale: float, penalize_undefined_parts: bool=False, experiment=None):
 
 
     if synthetic:
         # dir_img = Path('/home/capurjos/synt_data/imgs')
         # dir_mask = Path('/home/capurjos/synt_data/labels')
-        dir_img = Path('/home/capurjos/synthetic_dataset/minimal_synthetic/imgs')
-        dir_mask = Path('/home/capurjos/synthetic_dataset/minimal_synthetic/labels')
+        # dir_img = Path('/home/capurjos/synthetic_dataset/minimal_synthetic/imgs')
+        # dir_mask = Path('/home/capurjos/synthetic_dataset/minimal_synthetic/labels')
+        dir_img = Path('/home/capurjos/test_dataset/synthetic/synthetic_final/imgs')
+        dir_mask = Path('/home/capurjos/test_dataset/synthetic/synthetic_final/labels')
     else:
         dir_img = Path('/home/capurjos/modified_labels/imgs')
         dir_mask = Path('/home/capurjos/modified_labels/json_masks')
@@ -77,9 +79,9 @@ def train(epochs: int, batch_sz: int, learning_rate:int, synthetic: bool,
 
     num_segments_per_line = 20
     dataset = fsDataset(dir_img, dir_mask, synthetic)
-
-    trn_size = int(0.9 * dataset_length)
-    val_size = int(0.1 * dataset_length)
+    # TODO..
+    trn_size = int(0.1 * dataset_length)
+    val_size = int(0.9 * dataset_length)
 
     print_log_info(dataset, trn_size, val_size)
     train_losses = []
@@ -97,6 +99,7 @@ def train(epochs: int, batch_sz: int, learning_rate:int, synthetic: bool,
     val_loader = torch.utils.data.DataLoader(val_dataset,
                                              batch_size=batch_sz,
                                              shuffle=False, drop_last=True)
+    print(f"length of val loader is {(val_size // batch_sz) * batch_sz}")
 
 
     device = torch.device("cuda")
@@ -107,6 +110,8 @@ def train(epochs: int, batch_sz: int, learning_rate:int, synthetic: bool,
     model = torch.hub.load('pytorch/vision:v0.10.0', 'resnet18').to(device)
     model.avgpool = nn.AdaptiveAvgPool2d(output_size=(5, 5)).to(device)
     model.fc = nn.Linear(12800 , 2 * num_segments_per_line * width).to(device)
+    # TODO..
+    model.load_state_dict(torch.load("models/synthetic/synthetic_20000_2023-05-19 03:19:00.376373_model_epoch_30.pt", map_location=device))
 
     summary(model, input_size=(batch_sz, num_channels, 420, 1280))
     if penalize_undefined_parts:
@@ -117,6 +122,7 @@ def train(epochs: int, batch_sz: int, learning_rate:int, synthetic: bool,
     criterion = nn.MSELoss()
     # criterion = nn.CrossEntropyLoss()
     # criterion = nn.L1Loss()
+    # TODo not necessary 0 - the track is not in the sky..
     rows = np.linspace(height, 0, num_segments_per_line).astype(int)
     global_step = 0
     for epoch in range(1, epochs + 1):
@@ -163,7 +169,7 @@ def train(epochs: int, batch_sz: int, learning_rate:int, synthetic: bool,
                 else:
                     try:
                         left_indices = torch.where(left_lane_heatmap.argmax(axis=2) > 2)
-                        right_indices = torch.where((right_lane_heatmap.argmax(axis=2) < 1277) & (right_lane_heatmap.argmax(axis=2) > 2))
+                        right_indices = torch.where((right_lane_heatmap.argmax(axis=2) < 316) & (right_lane_heatmap.argmax(axis=2) > 2))
                         left_lane_nn_output, right_lane_nn_output = np.split(net_output, 2, axis=1)
                         left_lane_nn_output = left_lane_nn_output.reshape(batch_sz, 20, width)
                         right_lane_nn_output = right_lane_nn_output.reshape(batch_sz, 20, width)
@@ -193,8 +199,8 @@ def train(epochs: int, batch_sz: int, learning_rate:int, synthetic: bool,
                 if i_batch % 10 == 0:
                     print('[TRN] Train epoch: {}, batch: {}\tLoss: {:.4f}'.format(
                         epoch, i_batch, loss.item()))
-            print(f"Training loss per epoch is {train_loss / len(trn_loader)}")
-            train_losses.append(train_loss / len(trn_loader))
+            print(f"Training loss per epoch is {train_loss / (trn_size // batch_sz)}")
+            train_losses.append(train_loss / (trn_size // batch_sz) * batch_sz)
 
             model.eval()
 
@@ -210,12 +216,13 @@ def train(epochs: int, batch_sz: int, learning_rate:int, synthetic: bool,
                     net_output = model(images).float()
                     left_lane_nn_output, right_lane_nn_output = np.split(net_output, 2, axis=1)
                     left_indices = torch.where(left_lane_heatmap.argmax(axis=2) > 2)
-                    right_indices = torch.where((right_lane_heatmap.argmax(axis=2) < width - 1) & (right_lane_heatmap.argmax(axis=2) > 2))
+                    # print(f"width is {width}")
                     left_lane_nn_output, right_lane_nn_output = np.split(net_output, 2, axis=1)
                     try:
                         left_lane_nn_output = left_lane_nn_output.reshape(batch_sz, 20, width)
                         right_lane_nn_output = right_lane_nn_output.reshape(batch_sz, 20, width)
                     except RuntimeError:
+                        print("runtime error, fix this please")
                         continue
 
                     if penalize_undefined_parts:
@@ -224,6 +231,7 @@ def train(epochs: int, batch_sz: int, learning_rate:int, synthetic: bool,
                     else:
                         loss = criterion(left_lane_nn_output[left_indices].flatten(), left_lane_heatmap[left_indices].flatten())
                         loss += criterion(right_lane_nn_output[right_indices].flatten(), right_lane_heatmap[right_indices].flatten())
+                        print(f"loss val is: {loss}")
                     experiment.log({
                                     'learning rate': optimizer.param_groups[0]['lr'],
                                     'step': global_step,
@@ -231,7 +239,7 @@ def train(epochs: int, batch_sz: int, learning_rate:int, synthetic: bool,
                                     'validation loss': loss.item()
                                 })
 
-
+                    val_loss += loss.item()
                     left_lane_heatmap = left_lane_heatmap.cpu()
                     right_lane_heatmap = right_lane_heatmap.cpu()
                     for i in range(len(images)):
@@ -246,7 +254,7 @@ def train(epochs: int, batch_sz: int, learning_rate:int, synthetic: bool,
                         filename = filenames[i].split("/")[-1]
                         # TODO visualise heatmaps - in github older commits
 
-                        if epoch > 15:
+                        if epoch > 0:
                             # TODO visualise only filtered parts of images if not penalizing everything...
                             scaling_param = 1280 / width
                             plt.clf()
@@ -257,10 +265,10 @@ def train(epochs: int, batch_sz: int, learning_rate:int, synthetic: bool,
                             plt.imshow((images[i].cpu().permute(1, 2, 0))) #.numpy().astype(np.uint8)))
                             plt.savefig("predicted_imgs/" + directory + "/epoch_" + str(epoch) + "_" + filename)
 
-                    val_loss += loss.item()
                 try:
-                    print(f"Validation loss per epoch is {val_loss / len(val_loader)}")
-                    val_losses.append(val_loss / len(val_loader))
+                    print(f"accumulated val loss per epoch is {val_loss}")
+                    print(f"Validation loss per epoch is {val_loss / (val_size // batch_sz)}")
+                    val_losses.append(val_loss / (val_size // batch_sz))
                 except ZeroDivisionError:
                     print(f"Length of validation dataset is zero.")
         # TODO synthetic and real_world should have this directory in losses etc.
@@ -289,7 +297,7 @@ if __name__ == "__main__":
     parser.add_argument('--debug', action='store_true',
                         help='True if you want to print additional information')
     parser.add_argument('--scale', '-s', type=float, default=1, help='Downscaling factor of the images')
-    parser.add_argument('--epochs', '-e', metavar='E', type=int, default=40, help='Number of epochs')
+    parser.add_argument('--epochs', '-e', metavar='E', type=int, default=150, help='Number of epochs')
     parser.add_argument('--batch-size', '-b', dest='batch_size', metavar='B', type=int, default=8, help='Batch size')
     parser.add_argument('--learning-rate', '-l', metavar='LR', type=float, default=1e-3, help='Learning rate', dest='lr')
     parser.add_argument('--penalize',  action='store_true', help='Penalize borders of the road that are ambiguous')
@@ -305,7 +313,7 @@ if __name__ == "__main__":
     # dataset_length = 10000
     # train(args.synthetic, args.pretrained, dataset_length, "synthetic_" + str(dataset_length))
     # TODO synthetic should work correctly
-        dataset_length = 1000
+        dataset_length = 400
         directory = "synthetic_" + str(dataset_length) + "_" + str(timestamp)
         train(args.epochs, args.batch_size, args.lr, args.synthetic,
           args.pretrained, dataset_length, directory, args.scale, args.penalize, experiment)

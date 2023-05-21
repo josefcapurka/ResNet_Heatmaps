@@ -175,8 +175,9 @@ def get_synt_mask_measurements(img_name, mask_dir):
         right[np.arange(len(right_mask)), idx] = 255
         right[:, 0] = 0
         # print(rows)
-        mask["left_lane"] = left #[rows]
-        mask["right_lane"] = right #[rows]
+        # HOTFIX - labels in synthetic are switched...
+        mask["left_lane"] = right #[rows]
+        mask["right_lane"] = left #[rows]
         return mask
 
 
@@ -191,7 +192,7 @@ def create_heatmap(mask, img_name):
     # plt.clf()
     # heatmap = plt.imshow(right_heatmap, cmap='hot', interpolation='nearest')
     # plt.colorbar(heatmap)
-    # # # plt.show()
+    # # # # plt.show()
     # plt.savefig("heatmaps_labels/right" + img_name)
 
     # bag of tricks
